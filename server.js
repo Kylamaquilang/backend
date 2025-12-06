@@ -67,21 +67,31 @@ if (process.env.FRONTEND_URL) {
 // Socket.io CORS configuration - allow localhost and Vercel domains
 const socketCorsOptions = {
   origin: function (origin, callback) {
+    // Allow requests with no origin
     if (!origin) {
       return callback(null, true);
     }
-    // Always allow localhost for development
+    
+    // Always allow localhost for development (any port)
     if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      console.log(`✅ Socket.io allowing localhost origin: ${origin}`);
       return callback(null, true);
     }
+    
+    // Check if origin is in allowed list
     if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log(`✅ Socket.io allowing configured origin: ${origin}`);
       return callback(null, true);
     }
+    
     // Allow any *.vercel.app domain
     if (origin.endsWith('.vercel.app')) {
+      console.log(`✅ Socket.io allowing Vercel domain: ${origin}`);
       return callback(null, true);
     }
-    callback(new Error('Not allowed by CORS'));
+    
+    console.warn(`🚫 Socket.io CORS blocked origin: ${origin}`);
+    return callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST'],
   allowedHeaders: ['Authorization', 'Content-Type'],
