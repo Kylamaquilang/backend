@@ -64,24 +64,24 @@ if (process.env.FRONTEND_URL) {
   allowedOrigins.push(process.env.FRONTEND_URL);
 }
 
-// Socket.io CORS configuration - allow Vercel preview domains
+// Socket.io CORS configuration - allow localhost and Vercel domains
 const socketCorsOptions = {
   origin: function (origin, callback) {
     if (!origin) {
       return callback(null, true);
     }
+    // Always allow localhost for development
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      return callback(null, true);
+    }
     if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } 
-    // Allow any *.vercel.app domain by default
-    else if (origin.endsWith('.vercel.app')) {
-      callback(null, true);
+      return callback(null, true);
     }
-    else if (process.env.ALLOW_VERCEL_PREVIEWS === 'true' && origin.endsWith('.vercel.app')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+    // Allow any *.vercel.app domain
+    if (origin.endsWith('.vercel.app')) {
+      return callback(null, true);
     }
+    callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST'],
   allowedHeaders: ['Authorization', 'Content-Type'],
@@ -119,7 +119,7 @@ if (process.env.FRONTEND_URL) {
   corsOrigins.push(process.env.FRONTEND_URL);
 }
 
-// Dynamic CORS configuration - allow localhost and Vercel preview domains
+// Dynamic CORS configuration - allow localhost and Vercel domains
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -127,31 +127,24 @@ const corsOptions = {
       return callback(null, true);
     }
     
-    // Always allow localhost for development
+    // Always allow localhost for development (any port)
     if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-      console.log(`✅ Allowing localhost origin: ${origin}`);
       return callback(null, true);
     }
     
     // Check if origin is in allowed list
     if (corsOrigins.indexOf(origin) !== -1) {
-      console.log(`✅ Allowing configured origin: ${origin}`);
       return callback(null, true);
-    } 
+    }
+    
     // Allow any *.vercel.app domain by default (for easier deployment)
-    else if (origin.endsWith('.vercel.app')) {
-      console.log(`✅ Allowing Vercel preview domain: ${origin}`);
+    if (origin.endsWith('.vercel.app')) {
       return callback(null, true);
     }
-    // If ALLOW_VERCEL_PREVIEWS is enabled, also allow (redundant but safe)
-    else if (process.env.ALLOW_VERCEL_PREVIEWS === 'true' && origin.endsWith('.vercel.app')) {
-      return callback(null, true);
-    }
-    else {
-      console.warn(`🚫 CORS blocked origin: ${origin}`);
-      console.warn(`🌐 Allowed origins:`, corsOrigins);
-      return callback(new Error('Not allowed by CORS'));
-    }
+    
+    // Block all other origins
+    console.warn(`🚫 CORS blocked origin: ${origin}`);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -162,7 +155,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Handle preflight OPTIONS requests explicitly for all routes
+// Handle preflight OPTIONS requests explicitly
 app.options('*', cors(corsOptions));
 
 // Enhanced Security middleware
