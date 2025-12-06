@@ -951,12 +951,12 @@ const getInventoryStockReport = async (req, res) => {
     }
     
     // Apply size filter in the query
-    if (size && size !== 'N/A' && size !== 'NONE') {
-      // Filter for specific size
-      productQuery += ' AND (ps.size = ? OR (ps.size IS NULL AND ? = \'N/A\'))';
-      productParams.push(size, size);
+    if (size && size !== '' && size !== 'N/A' && size !== 'NONE') {
+      // Filter for specific size - must match exactly
+      productQuery += ' AND ps.size = ?';
+      productParams.push(size);
     } else if (size === 'N/A' || size === 'NONE') {
-      // Filter for products without sizes
+      // Filter for products without sizes (no size_id or size is N/A/NONE)
       productQuery += ' AND (ps.size IS NULL OR ps.size = \'N/A\' OR ps.size = \'NONE\')';
     }
     
@@ -969,12 +969,18 @@ const getInventoryStockReport = async (req, res) => {
       const sizeId = product.size_id;
       const productSize = product.size || 'N/A';
       
-      // Skip if size filter is applied and doesn't match
-      if (size && size !== 'N/A' && size !== 'NONE' && productSize !== size) {
-        continue;
-      }
-      if (size && (size === 'N/A' || size === 'NONE') && productSize !== 'N/A' && productSize !== 'NONE') {
-        continue;
+      // Additional size filter check (double-check after query filter)
+      // This handles edge cases and ensures exact matching
+      if (size && size !== '' && size !== 'N/A' && size !== 'NONE') {
+        // Exact match required for specific sizes
+        if (productSize !== size) {
+          continue;
+        }
+      } else if (size === 'N/A' || size === 'NONE') {
+        // Filter for products without sizes
+        if (productSize !== 'N/A' && productSize !== 'NONE' && productSize !== null) {
+          continue;
+        }
       }
       
       // Get beginning stock (stock at start_date or current stock if no start_date)
