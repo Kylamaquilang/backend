@@ -11,6 +11,7 @@ import {
   getSalesPerformance,
   getDetailedSalesReport,
   getProductSalesReport,
+  getSalesAnalytics,
   confirmOrderReceipt,
   userConfirmOrderReceipt,
   confirmOrderReceiptNotification,
@@ -44,6 +45,7 @@ router.get('/test-db', async (req, res) => {
 // Analytics and reporting routes (MUST come before parameterized routes)
 router.get('/stats', verifyToken, isAdmin, getOrderStats)
 router.get('/sales-performance', verifyToken, isAdmin, getSalesPerformance)
+router.get('/sales-analytics', verifyToken, isAdmin, getSalesAnalytics)
 router.get('/detailed-sales-report', verifyToken, isAdmin, getDetailedSalesReport)
 router.get('/product-sales-report', verifyToken, isAdmin, getProductSalesReport)
 
