@@ -988,34 +988,10 @@ const getInventoryStockReport = async (req, res) => {
         sizeCondition = 'AND (sm.size_id IS NULL OR sm.size_id = 0)';
       }
       
-      // Build size condition for all queries (must be done before using it)
-      // For products with sizes: match exact size_id
-      // For products without sizes: match NULL size_id OR movements that don't have size_id
-      let sizeCondition = '';
-      let sizeParams = [];
-      if (sizeId) {
-        // Product has a specific size - match movements for that size only
-        sizeCondition = 'AND sm.size_id = ?';
-        sizeParams = [sizeId];
-      } else {
-        // Product has no size - match movements where size_id is NULL or 0
-        // This includes movements recorded without size_id (from updateProductStock, etc.)
-        sizeCondition = 'AND (sm.size_id IS NULL OR sm.size_id = 0)';
-      }
-      
       // Calculate beginning stock (movements before start_date)
       let beginningStock = 0;
       if (start_date) {
-        // Build size condition for movements before start_date (same logic as period movements)
-        let sizeConditionBefore = '';
-        let sizeParamsBefore = [];
-        if (sizeId) {
-          sizeConditionBefore = 'AND sm.size_id = ?';
-          sizeParamsBefore = [sizeId];
-        } else {
-          sizeConditionBefore = 'AND (sm.size_id IS NULL OR sm.size_id = 0)';
-        }
-        
+        // Use the same size condition for beginning stock calculation
         const [movementsBefore] = await pool.query(`
           SELECT 
             COALESCE(SUM(CASE 
