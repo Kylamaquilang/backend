@@ -119,7 +119,7 @@ if (process.env.FRONTEND_URL) {
   corsOrigins.push(process.env.FRONTEND_URL);
 }
 
-// Dynamic CORS configuration - allow Vercel preview domains by default
+// Dynamic CORS configuration - allow localhost and Vercel preview domains
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -127,23 +127,30 @@ const corsOptions = {
       return callback(null, true);
     }
     
+    // Always allow localhost for development
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      console.log(`✅ Allowing localhost origin: ${origin}`);
+      return callback(null, true);
+    }
+    
     // Check if origin is in allowed list
     if (corsOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
+      console.log(`✅ Allowing configured origin: ${origin}`);
+      return callback(null, true);
     } 
     // Allow any *.vercel.app domain by default (for easier deployment)
     else if (origin.endsWith('.vercel.app')) {
       console.log(`✅ Allowing Vercel preview domain: ${origin}`);
-      callback(null, true);
+      return callback(null, true);
     }
     // If ALLOW_VERCEL_PREVIEWS is enabled, also allow (redundant but safe)
     else if (process.env.ALLOW_VERCEL_PREVIEWS === 'true' && origin.endsWith('.vercel.app')) {
-      callback(null, true);
+      return callback(null, true);
     }
     else {
       console.warn(`🚫 CORS blocked origin: ${origin}`);
       console.warn(`🌐 Allowed origins:`, corsOrigins);
-      callback(new Error('Not allowed by CORS'));
+      return callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
