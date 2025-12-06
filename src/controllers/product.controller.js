@@ -9,7 +9,7 @@ import {
     validateStock
 } from '../utils/validation.js';
 import { emitAdminDataRefresh, emitDataRefresh } from '../utils/socket-helper.js';
-import { ensureDeletedAtColumn, getDeletedAtConditionSafe } from '../utils/migration-helper.js';
+import { ensureDeletedAtColumn, getDeletedAtConditionSafe, ensureProductImagesTable } from '../utils/migration-helper.js';
 import { 
   AppError, 
   ValidationError, 
@@ -335,6 +335,9 @@ export const createProduct = async (req, res) => {
 
       // Store multiple images if provided
       if (images && Array.isArray(images) && images.length > 0) {
+        // Ensure product_images table exists
+        await ensureProductImagesTable();
+        
         for (let i = 0; i < images.length; i++) {
           try {
             await connection.query(
@@ -692,6 +695,9 @@ export const getProductById = asyncHandler(async (req, res) => {
 
     // Try to get product images if the table exists
     try {
+      // Ensure product_images table exists
+      await ensureProductImagesTable();
+      
       const [images] = await pool.query(
         `SELECT id, image_url, display_order, is_primary 
          FROM product_images 
@@ -968,6 +974,9 @@ export const updateProduct = async (req, res) => {
 
       // Handle multiple images if provided
       if (req.body.images && typeof req.body.images === 'object') {
+        // Ensure product_images table exists
+        await ensureProductImagesTable();
+        
         const { add = [], remove = [], existing = [] } = req.body.images;
         
         // Remove images

@@ -1,6 +1,7 @@
 import { pool } from '../database/db.js';
 
 let deletedAtColumnChecked = false;
+let productImagesTableChecked = false;
 
 /**
  * Ensures the deleted_at column exists in the products table
@@ -29,6 +30,50 @@ export const ensureDeletedAtColumn = async () => {
   } catch (error) {
     console.error('Error checking/adding deleted_at column:', error);
     // Don't throw - allow queries to continue (they'll handle missing column gracefully)
+    return false;
+  }
+};
+
+/**
+ * Ensures the product_images table exists
+ * This is called automatically on first use
+ */
+export const ensureProductImagesTable = async () => {
+  if (productImagesTableChecked) {
+    return true; // Already checked
+  }
+
+  try {
+    const [tables] = await pool.query(`
+      SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'product_images'
+    `);
+    
+    if (tables.length === 0) {
+      console.log('🔧 Creating product_images table...');
+      await pool.query(`
+        CREATE TABLE product_images (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          product_id INT NOT NULL,
+          image_url VARCHAR(255) NOT NULL,
+          display_order INT DEFAULT 0,
+          is_primary BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+          INDEX idx_product_id_images (product_id),
+          INDEX idx_display_order (display_order),
+          INDEX idx_is_primary (is_primary)
+        )
+      `);
+      console.log('✅ product_images table created successfully.');
+    }
+    
+    productImagesTableChecked = true;
+    return true;
+  } catch (error) {
+    console.error('Error checking/creating product_images table:', error);
+    // Don't throw - allow queries to continue (they'll handle missing table gracefully)
     return false;
   }
 };
