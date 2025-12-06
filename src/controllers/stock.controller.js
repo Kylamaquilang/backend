@@ -989,6 +989,16 @@ const getInventoryStockReport = async (req, res) => {
       
       if (start_date) {
         // Calculate stock at the start_date by summing all movements before that date
+        // Build size condition for movements before start_date
+        let sizeConditionBefore = '';
+        let sizeParamsBefore = [];
+        if (sizeId) {
+          sizeConditionBefore = 'AND sm.size_id = ?';
+          sizeParamsBefore = [sizeId];
+        } else {
+          sizeConditionBefore = 'AND sm.size_id IS NULL';
+        }
+        
         const [movementsBefore] = await pool.query(`
           SELECT 
             SUM(CASE 
@@ -1003,9 +1013,9 @@ const getInventoryStockReport = async (req, res) => {
             END) as stock_out
           FROM stock_movements sm
           WHERE sm.product_id = ?
-            AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))
+            ${sizeConditionBefore}
             AND DATE(sm.created_at) < ?
-        `, [product.product_id, sizeId || null, sizeId || null, start_date]);
+        `, [product.product_id, ...sizeParamsBefore, start_date]);
         
         const stockInBefore = parseFloat(movementsBefore[0]?.stock_in || 0);
         const stockOutBefore = parseFloat(movementsBefore[0]?.stock_out || 0);
@@ -1047,8 +1057,24 @@ const getInventoryStockReport = async (req, res) => {
           ${dateFilter}
       `;
       
-      const movementParams = [product.product_id, sizeId || null, sizeId || null, ...dateParams];
-      const [movements] = await pool.query(movementQuery, movementParams);
+      // Build size condition for movements in period
+      let sizeCondition = '';
+      let sizeParams = [];
+      if (sizeId) {
+        sizeCondition = 'AND sm.size_id = ?';
+        sizeParams = [sizeId];
+      } else {
+        sizeCondition = 'AND sm.size_id IS NULL';
+      }
+      
+      // Replace the size condition placeholder in the query
+      const finalMovementQuery = movementQuery.replace(
+        'AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))',
+        sizeCondition
+      );
+      
+      const movementParams = [product.product_id, ...sizeParams, ...dateParams];
+      const [movements] = await pool.query(finalMovementQuery, movementParams);
       
       // Calculate totals from movements in the period
       // Stock In = restocks + positive adjustments
