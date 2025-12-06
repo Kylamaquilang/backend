@@ -1094,7 +1094,8 @@ const getInventoryStockReport = async (req, res) => {
       const endingStock = beginningStock + stockIn - stockOut;
       
       // Verify calculations match what's in the history
-      // Double-check by querying all movements for this product/size to ensure accuracy
+      // Re-query movements with the same conditions to ensure accuracy
+      // This ensures the report matches exactly what appears in the history
       const [verificationMovements] = await pool.query(`
         SELECT 
           COUNT(*) as total_movements,
@@ -1111,29 +1112,28 @@ const getInventoryStockReport = async (req, res) => {
         FROM stock_movements sm
         WHERE sm.product_id = ?
           ${sizeCondition}
-      `, [product.product_id, ...sizeParams]);
+          ${dateCondition}
+      `, [product.product_id, ...sizeParams, ...dateParams]);
       
       const verifiedStockIn = parseFloat(verificationMovements[0]?.total_stock_in || 0);
       const verifiedStockOut = parseFloat(verificationMovements[0]?.total_stock_out || 0);
       
-      // If there's a discrepancy, use the verified totals (all movements)
+      // Use verified totals to ensure consistency with history
+      // This ensures the report exactly matches what's shown in the inventory history
       if (Math.abs(verifiedStockIn - stockIn) > 0.01 || Math.abs(verifiedStockOut - stockOut) > 0.01) {
-        console.warn(`⚠️ Discrepancy detected for Product ${product.product_id} "${product.product_name}" (Size: ${productSize}):`);
-        console.warn(`   Period movements - In: ${stockIn}, Out: ${stockOut}`);
-        console.warn(`   All movements - In: ${verifiedStockIn}, Out: ${verifiedStockOut}`);
-        console.warn(`   Using verified totals from all movements to match history`);
+        console.warn(`⚠️ Calculation discrepancy for Product ${product.product_id} "${product.product_name}" (Size: ${productSize}):`);
+        console.warn(`   Initial calculation - In: ${stockIn}, Out: ${stockOut}`);
+        console.warn(`   Verified calculation - In: ${verifiedStockIn}, Out: ${verifiedStockOut}`);
+        console.warn(`   Using verified totals to match history`);
         
         // Use verified totals to ensure consistency with history
         stockIn = verifiedStockIn;
         stockOut = verifiedStockOut;
-        
-        // Recalculate ending stock with verified values
-        const verifiedEndingStock = beginningStock + stockIn - stockOut;
-        const finalEndingStock = Math.max(0, verifiedEndingStock);
-        
-        // Update the ending stock
-        endingStock = finalEndingStock;
       }
+      
+      // Recalculate ending stock with verified values
+      const verifiedEndingStock = beginningStock + stockIn - stockOut;
+      endingStock = Math.max(0, verifiedEndingStock);
       
       // Get unit price/cost (size price if available, otherwise product price)
       // Try to get cost from original_price first, then price
