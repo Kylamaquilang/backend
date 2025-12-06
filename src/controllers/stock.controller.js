@@ -906,20 +906,7 @@ const getInventoryStockReport = async (req, res) => {
     const { start_date, end_date, product_id, category_id, size, status, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     
-    // Build date filter for stock_movements query
-    let dateFilter = '';
-    let dateParams = [];
-    
-    if (start_date) {
-      dateFilter += 'AND DATE(sm.created_at) >= ? ';
-      dateParams.push(start_date);
-    }
-    if (end_date) {
-      dateFilter += 'AND DATE(sm.created_at) <= ? ';
-      dateParams.push(end_date);
-    }
-    
-    // Note: product_id, category_id, and size filters are applied in the product query, not in dateFilter
+    // Note: Date filters are now applied directly in the movement queries for better control
     
     // Get all products with their sizes
     let productQuery = `
@@ -1067,16 +1054,20 @@ const getInventoryStockReport = async (req, res) => {
       const endingStock = beginningStock + stockIn - stockOut;
       
       // Debug logging for troubleshooting
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`📊 Product ${product.product_id} (Size: ${productSize || 'N/A'}):`, {
-          beginningStock,
-          stockIn,
-          stockOut,
-          endingStock,
-          hasMovements: movements && movements.length > 0,
-          movementCount: movements?.[0] ? 'found' : 'none'
-        });
-      }
+      console.log(`📊 Product ${product.product_id} "${product.product_name}" (Size: ${productSize || 'N/A'}, SizeID: ${sizeId || 'NULL'}):`, {
+        beginningStock,
+        stockIn,
+        stockOut,
+        endingStock,
+        queryParams: {
+          product_id: product.product_id,
+          sizeId: sizeId || null,
+          sizeCondition,
+          dateCondition,
+          dateParams
+        },
+        movementResult: movements?.[0] || 'no movements found'
+      });
       
       // Get unit price/cost (size price if available, otherwise product price)
       // Try to get cost from original_price first, then price
