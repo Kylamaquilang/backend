@@ -939,16 +939,26 @@ const getInventoryStockReport = async (req, res) => {
       WHERE p.is_active = TRUE AND p.deleted_at IS NULL
     `;
     
+    const productParams = [];
+    
     if (product_id) {
       productQuery += ' AND p.id = ?';
+      productParams.push(parseInt(product_id));
     }
     if (category_id) {
       productQuery += ' AND p.category_id = ?';
+      productParams.push(parseInt(category_id));
     }
     
-    const productParams = [];
-    if (product_id) productParams.push(parseInt(product_id));
-    if (category_id) productParams.push(parseInt(category_id));
+    // Apply size filter in the query
+    if (size && size !== 'N/A' && size !== 'NONE') {
+      // Filter for specific size
+      productQuery += ' AND (ps.size = ? OR (ps.size IS NULL AND ? = \'N/A\'))';
+      productParams.push(size, size);
+    } else if (size === 'N/A' || size === 'NONE') {
+      // Filter for products without sizes
+      productQuery += ' AND (ps.size IS NULL OR ps.size = \'N/A\' OR ps.size = \'NONE\')';
+    }
     
     const [products] = await pool.query(productQuery, productParams);
     
