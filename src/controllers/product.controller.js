@@ -75,6 +75,7 @@ export const getAllProductsSimple = async (req, res) => {
         p.image,
         p.created_at,
         p.last_restock_date,
+        p.category_id,
         c.name as category_name,
         c.name as category
       FROM products p
