@@ -949,6 +949,49 @@ export const updateProduct = async (req, res) => {
         );
       }
 
+      // Handle multiple images if provided
+      if (req.body.images && typeof req.body.images === 'object') {
+        const { add = [], remove = [], existing = [] } = req.body.images;
+        
+        // Remove images
+        if (remove && remove.length > 0) {
+          await connection.query(
+            'DELETE FROM product_images WHERE id IN (?)',
+            [remove]
+          );
+        }
+        
+        // Add new images
+        if (add && add.length > 0) {
+          for (let i = 0; i < add.length; i++) {
+            await connection.query(
+              `INSERT INTO product_images (product_id, image_url, display_order, is_primary, created_at) 
+               VALUES (?, ?, ?, ?, NOW())`,
+              [id, add[i], i, i === 0 && existing.length === 0] // First new image is primary if no existing images
+            );
+          }
+        }
+        
+        // Update existing images (set primary)
+        if (existing && existing.length > 0) {
+          // First, unset all primary flags
+          await connection.query(
+            'UPDATE product_images SET is_primary = FALSE WHERE product_id = ?',
+            [id]
+          );
+          
+          // Set primary for specified images
+          for (const img of existing) {
+            if (img.is_primary) {
+              await connection.query(
+                'UPDATE product_images SET is_primary = TRUE WHERE id = ? AND product_id = ?',
+                [img.id, id]
+              );
+            }
+          }
+        }
+      }
+
       // Update product sizes if provided
       if (sizes && Array.isArray(sizes)) {
         // Get existing sizes to preserve base_stock and stock
