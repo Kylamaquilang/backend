@@ -673,6 +673,27 @@ export const getProductById = asyncHandler(async (req, res) => {
       product.sizes = [];
     }
 
+    // Try to get product images if the table exists
+    try {
+      const [images] = await pool.query(
+        `SELECT id, image_url, display_order, is_primary 
+         FROM product_images 
+         WHERE product_id = ? 
+         ORDER BY is_primary DESC, display_order ASC, id ASC`,
+        [validatedId]
+      );
+      product.images = images.map(img => ({
+        id: img.id,
+        url: img.image_url,
+        is_primary: img.is_primary === 1 || img.is_primary === true,
+        display_order: img.display_order || 0
+      }));
+    } catch (imageError) {
+      // If product_images table doesn't exist, use single image field
+      logger.debug('Product images table not available, using single image field');
+      product.images = product.image ? [{ id: 'primary', url: product.image, is_primary: true }] : [];
+    }
+
     logger.info('Product retrieved successfully', { productId: validatedId });
     res.json(product);
   } catch (error) {
