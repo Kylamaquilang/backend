@@ -1026,7 +1026,8 @@ const getInventoryStockReport = async (req, res) => {
         dateParams.push(end_date);
       }
       
-      const [movements] = await pool.query(`
+      // Query movements with size condition
+      let [movements] = await pool.query(`
         SELECT 
           COALESCE(SUM(CASE 
             WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
@@ -1052,8 +1053,41 @@ const getInventoryStockReport = async (req, res) => {
       `, [product.product_id, ...sizeParams, ...dateParams]);
       
       // Calculate totals from movements
-      const stockIn = parseFloat(movements[0]?.stock_in || 0);
-      const stockOut = parseFloat(movements[0]?.stock_out || 0);
+      let stockIn = parseFloat(movements[0]?.stock_in || 0);
+      let stockOut = parseFloat(movements[0]?.stock_out || 0);
+      
+      // Fallback: If no movements found with size filter and product has no size,
+      // try to find ANY movements for this product (in case movements were recorded incorrectly)
+      if (stockIn === 0 && stockOut === 0 && !sizeId) {
+        console.log(`🔄 Fallback: No movements found with size_id IS NULL for product ${product.product_id}, checking ALL movements...`);
+        const [fallbackMovements] = await pool.query(`
+          SELECT 
+            COALESCE(SUM(CASE 
+              WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
+              ELSE 0 
+            END), 0) as stock_in,
+            COALESCE(SUM(CASE 
+              WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
+              ELSE 0 
+            END), 0) as stock_out
+          FROM stock_movements sm
+          WHERE sm.product_id = ?
+            ${dateCondition}
+        `, [product.product_id, ...dateParams]);
+        
+        const fallbackStockIn = parseFloat(fallbackMovements[0]?.stock_in || 0);
+        const fallbackStockOut = parseFloat(fallbackMovements[0]?.stock_out || 0);
+        
+        if (fallbackStockIn > 0 || fallbackStockOut > 0) {
+          console.log(`✅ Fallback found movements: Stock In = ${fallbackStockIn}, Stock Out = ${fallbackStockOut}`);
+          stockIn = fallbackStockIn;
+          stockOut = fallbackStockOut;
+          // Update movements array for logging
+          movements = fallbackMovements;
+        }
+      }
       
       // Calculate ending stock: Beginning + In - Out
       const endingStock = beginningStock + stockIn - stockOut;
