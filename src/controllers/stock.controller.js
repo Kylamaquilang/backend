@@ -1058,8 +1058,21 @@ const getInventoryStockReport = async (req, res) => {
       
       // Calculate ending stock
       // Formula: ending_stock = beginning_stock + stock_in - stock_out
-      // When no start_date, beginning_stock is 0 and stock_in/stock_out are totals from all movements
+      // - With start_date: beginning_stock = movements before start_date, stock_in/out = movements in period
+      // - Without start_date: beginning_stock = 0, stock_in/out = ALL movements (dateFilter is empty)
       const endingStock = beginningStock + stockIn - stockOut;
+      
+      // Debug logging for troubleshooting
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`📊 Product ${product.product_id} (Size: ${productSize || 'N/A'}):`, {
+          beginningStock,
+          stockIn,
+          stockOut,
+          endingStock,
+          hasMovements: movements && movements.length > 0,
+          movementCount: movements?.[0] ? 'found' : 'none'
+        });
+      }
       
       // Get unit price/cost (size price if available, otherwise product price)
       // Try to get cost from original_price first, then price
