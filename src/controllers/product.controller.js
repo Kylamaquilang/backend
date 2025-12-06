@@ -206,7 +206,7 @@ export const getAllProductsSimple = async (req, res) => {
 // ✅ Create Product
 export const createProduct = async (req, res) => {
   try {
-    const { name, description, price, original_price, stock, sizes, category_id, image } = req.body;
+    const { name, description, price, original_price, stock, sizes, category_id, image, images } = req.body;
     
     console.log('🔍 Received product data:', { name, description, price, original_price, stock, sizes, category_id, image });
 
