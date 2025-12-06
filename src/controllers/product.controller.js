@@ -333,6 +333,23 @@ export const createProduct = async (req, res) => {
 
       const productId = productResult.insertId;
 
+      // Store multiple images if provided
+      if (images && Array.isArray(images) && images.length > 0) {
+        for (let i = 0; i < images.length; i++) {
+          try {
+            await connection.query(
+              `INSERT INTO product_images (product_id, image_url, display_order, is_primary, created_at) 
+               VALUES (?, ?, ?, ?, NOW())`,
+              [productId, images[i], i, i === 0] // First image is primary
+            );
+          } catch (imageError) {
+            // If product_images table doesn't exist, just log and continue
+            console.log('Product images table not available, skipping multiple images:', imageError.message);
+            break;
+          }
+        }
+      }
+
       // If initial stock is provided, create initial stock transaction
       if (parseInt(stock) > 0) {
         console.log(`📦 Creating initial stock transaction for Product ID ${productId} with ${stock} units`);
