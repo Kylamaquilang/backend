@@ -165,13 +165,16 @@ const corsOptions = {
     } 
     else {
       console.warn(`🚫 CORS blocked origin: ${origin}`);
+      console.warn(`🌐 Allowed origins:`, corsOrigins);
+      console.warn(`🌐 ALLOW_VERCEL_PREVIEWS:`, process.env.ALLOW_VERCEL_PREVIEWS);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'X-Requested-With'],
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 };
 
 // Log allowed origins for debugging (but don't log in production for security)
