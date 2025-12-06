@@ -1058,21 +1058,45 @@ const getInventoryStockReport = async (req, res) => {
       // Calculate ending stock: Beginning + In - Out
       const endingStock = beginningStock + stockIn - stockOut;
       
-      // Debug logging for troubleshooting
-      console.log(`📊 Product ${product.product_id} "${product.product_name}" (Size: ${productSize || 'N/A'}, SizeID: ${sizeId || 'NULL'}):`, {
+      // Debug logging for troubleshooting - ALWAYS log to help diagnose issues
+      const debugInfo = {
+        product_id: product.product_id,
+        product_name: product.product_name,
+        size: productSize || 'N/A',
+        sizeId: sizeId || null,
         beginningStock,
         stockIn,
         stockOut,
         endingStock,
         queryParams: {
-          product_id: product.product_id,
-          sizeId: sizeId || null,
           sizeCondition,
           dateCondition,
-          dateParams
+          dateParams: dateParams.length > 0 ? dateParams : 'none (all movements)'
         },
-        movementResult: movements?.[0] || 'no movements found'
-      });
+        movementData: movements?.[0] || null,
+        hasMovements: movements && movements.length > 0 && movements[0]?.stock_in !== null
+      };
+      
+      console.log(`📊 Inventory Report - Product ${product.product_id} "${product.product_name}":`, JSON.stringify(debugInfo, null, 2));
+      
+      // Also log a simple summary
+      if (stockIn === 0 && stockOut === 0 && beginningStock === 0) {
+        console.warn(`⚠️ WARNING: Product ${product.product_id} "${product.product_name}" has ZERO movements. Checking if movements exist in database...`);
+        
+        // Quick diagnostic query to see if ANY movements exist for this product
+        const [diagnostic] = await pool.query(`
+          SELECT 
+            COUNT(*) as total_movements,
+            COUNT(CASE WHEN size_id IS NULL THEN 1 END) as movements_without_size,
+            COUNT(CASE WHEN size_id = ? THEN 1 END) as movements_with_size,
+            SUM(CASE WHEN movement_type = 'stock_in' THEN quantity ELSE 0 END) as total_stock_in,
+            SUM(CASE WHEN movement_type = 'stock_out' THEN quantity ELSE 0 END) as total_stock_out
+          FROM stock_movements
+          WHERE product_id = ?
+        `, [sizeId || null, product.product_id]);
+        
+        console.warn(`🔍 Diagnostic for Product ${product.product_id}:`, diagnostic[0]);
+      }
       
       // Get unit price/cost (size price if available, otherwise product price)
       // Try to get cost from original_price first, then price
