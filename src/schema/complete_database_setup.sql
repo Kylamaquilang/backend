@@ -79,6 +79,24 @@ CREATE TABLE products (
 );
 
 -- ============================================================
+-- PRODUCT IMAGES
+-- ============================================================
+
+CREATE TABLE product_images (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    image_url VARCHAR(255) NOT NULL,
+    display_order INT DEFAULT 0,
+    is_primary BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    INDEX idx_product_id (product_id),
+    INDEX idx_display_order (display_order),
+    INDEX idx_is_primary (is_primary)
+);
+
+-- ============================================================
 -- PRODUCT SIZES
 -- ============================================================
 
