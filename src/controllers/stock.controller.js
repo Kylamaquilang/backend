@@ -1052,7 +1052,7 @@ const getInventoryStockReport = async (req, res) => {
           SUM(CASE WHEN sm.movement_type = 'stock_out' AND sm.reason LIKE '%damage%' THEN sm.quantity ELSE 0 END) as damages,
           SUM(CASE WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity ELSE 0 END) as positive_adjustments,
           SUM(CASE WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END) as negative_adjustments,
-          GROUP_CONCAT(DISTINCT CONCAT(COALESCE(sm.reason, ''), ': ', COALESCE(sm.notes, '')) SEPARATOR '; ' LIMIT 1000) as remarks
+          SUBSTRING(GROUP_CONCAT(DISTINCT CONCAT(COALESCE(sm.reason, ''), ': ', COALESCE(sm.notes, '')) SEPARATOR '; '), 1, 1000) as remarks
         FROM stock_movements sm
         WHERE sm.product_id = ?
           AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))
