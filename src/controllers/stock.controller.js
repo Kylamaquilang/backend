@@ -983,25 +983,24 @@ const getInventoryStockReport = async (req, res) => {
         }
       }
       
-      // Get beginning stock (stock at start_date or current stock if no start_date)
+      // Calculate beginning stock from ALL stock movements before the start date
+      // This ensures accuracy by calculating from the source of truth (movements)
       let beginningStock = 0;
+      
       if (start_date) {
-        // Get stock before the start date
-        const [beginningStockQuery] = await pool.query(`
-          SELECT 
-            COALESCE(ps.stock, p.stock, 0) as stock
-          FROM products p
-          LEFT JOIN product_sizes ps ON p.id = ps.product_id AND ps.id = ? AND ps.is_active = 1
-          WHERE p.id = ?
-        `, [sizeId || null, product.product_id]);
-        
-        beginningStock = beginningStockQuery[0]?.stock || 0;
-        
-        // Subtract all movements before start_date
+        // Calculate stock at the start_date by summing all movements before that date
         const [movementsBefore] = await pool.query(`
           SELECT 
-            SUM(CASE WHEN sm.movement_type = 'stock_in' THEN sm.quantity ELSE 0 END) as stock_in,
-            SUM(CASE WHEN sm.movement_type = 'stock_out' THEN sm.quantity ELSE 0 END) as stock_out
+            SUM(CASE 
+              WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
+              ELSE 0 
+            END) as stock_in,
+            SUM(CASE 
+              WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
+              ELSE 0 
+            END) as stock_out
           FROM stock_movements sm
           WHERE sm.product_id = ?
             AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))
@@ -1010,22 +1009,32 @@ const getInventoryStockReport = async (req, res) => {
         
         const stockInBefore = parseFloat(movementsBefore[0]?.stock_in || 0);
         const stockOutBefore = parseFloat(movementsBefore[0]?.stock_out || 0);
-        beginningStock = beginningStock - stockInBefore + stockOutBefore;
+        // Beginning stock = all stock in - all stock out before start_date
+        beginningStock = stockInBefore - stockOutBefore;
       } else {
-        // No start date - use current stock
-        if (sizeId) {
-          const [sizeStock] = await pool.query(
-            'SELECT stock FROM product_sizes WHERE id = ?',
-            [sizeId]
-          );
-          beginningStock = sizeStock[0]?.stock || 0;
-        } else {
-          const [productStock] = await pool.query(
-            'SELECT stock FROM products WHERE id = ?',
-            [product.product_id]
-          );
-          beginningStock = productStock[0]?.stock || 0;
-        }
+        // No start date - calculate from ALL movements (beginning = 0, all movements are in the period)
+        // Or we can calculate current stock from all movements
+        const [allMovements] = await pool.query(`
+          SELECT 
+            SUM(CASE 
+              WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
+              ELSE 0 
+            END) as stock_in,
+            SUM(CASE 
+              WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
+              ELSE 0 
+            END) as stock_out
+          FROM stock_movements sm
+          WHERE sm.product_id = ?
+            AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))
+        `, [product.product_id, sizeId || null, sizeId || null]);
+        
+        const totalStockIn = parseFloat(allMovements[0]?.stock_in || 0);
+        const totalStockOut = parseFloat(allMovements[0]?.stock_out || 0);
+        // Beginning stock = 0 when no start_date (all movements are in the period)
+        beginningStock = 0;
       }
       
       // Get stock movements in the period
@@ -1062,11 +1071,15 @@ const getInventoryStockReport = async (req, res) => {
       const movementParams = [product.product_id, sizeId || null, sizeId || null, ...dateParams];
       const [movements] = await pool.query(movementQuery, movementParams);
       
-      // Calculate totals
+      // Calculate totals from movements in the period
       // Stock In = restocks + positive adjustments
       const stockIn = parseFloat(movements[0]?.stock_in || 0);
       // Stock Out = sales + returns + damages + negative adjustments
       const stockOut = parseFloat(movements[0]?.stock_out || 0);
+      
+      // Calculate ending stock
+      // Formula: ending_stock = beginning_stock + stock_in - stock_out
+      // When no start_date, beginning_stock is 0 and stock_in/stock_out are totals from all movements
       const endingStock = beginningStock + stockIn - stockOut;
       
       // Get unit price/cost (size price if available, otherwise product price)
