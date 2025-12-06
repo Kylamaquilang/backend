@@ -59,31 +59,51 @@ const allowedOrigins = [
   'http://127.0.0.1:3001'
 ];
 
-// Add Railway frontend URL if provided
+// Add Railway frontend URL if provided (supports comma-separated multiple URLs)
 if (process.env.FRONTEND_URL) {
-  const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+  const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim()).filter(url => url);
   allowedOrigins.push(...frontendUrls);
 }
 
-// Add Vercel frontend URL if provided
+// Add Vercel frontend URL if provided (supports comma-separated multiple URLs)
 if (process.env.VERCEL_URL) {
-  const vercelUrls = process.env.VERCEL_URL.split(',').map(url => url.trim());
+  const vercelUrls = process.env.VERCEL_URL.split(',').map(url => url.trim()).filter(url => url);
   allowedOrigins.push(...vercelUrls);
 }
 
 // Support common Vercel patterns
 if (process.env.NEXT_PUBLIC_VERCEL_URL) {
-  const vercelUrls = process.env.NEXT_PUBLIC_VERCEL_URL.split(',').map(url => url.trim());
+  const vercelUrls = process.env.NEXT_PUBLIC_VERCEL_URL.split(',').map(url => url.trim()).filter(url => url);
   allowedOrigins.push(...vercelUrls);
 }
 
-const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Authorization', 'Content-Type'],
-    credentials: true
+// Support Vercel preview URLs pattern (allows all *.vercel.app domains if enabled)
+if (process.env.ALLOW_VERCEL_PREVIEWS === 'true') {
+  // Note: This is a fallback - it's better to explicitly list URLs in FRONTEND_URL
+  console.log('⚠️ ALLOW_VERCEL_PREVIEWS is enabled - allowing all *.vercel.app domains');
+}
+
+// Socket.io CORS configuration - use same logic as Express CORS
+const socketCorsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) {
+      return callback(null, true);
+    }
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else if (process.env.ALLOW_VERCEL_PREVIEWS === 'true' && origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
   },
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Authorization', 'Content-Type'],
+  credentials: true
+};
+
+const io = new Server(server, {
+  cors: socketCorsOptions,
   transports: ['websocket', 'polling'],
   allowEIO3: true
 });
@@ -110,34 +130,59 @@ const corsOrigins = [
 
 // Add Railway frontend URL if provided (supports comma-separated multiple URLs)
 if (process.env.FRONTEND_URL) {
-  const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+  const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim()).filter(url => url);
   corsOrigins.push(...frontendUrls);
 }
 
 // Add Vercel frontend URL if provided (supports comma-separated multiple URLs)
 if (process.env.VERCEL_URL) {
-  const vercelUrls = process.env.VERCEL_URL.split(',').map(url => url.trim());
+  const vercelUrls = process.env.VERCEL_URL.split(',').map(url => url.trim()).filter(url => url);
   corsOrigins.push(...vercelUrls);
 }
 
 // Support common Vercel patterns
 if (process.env.NEXT_PUBLIC_VERCEL_URL) {
-  const vercelUrls = process.env.NEXT_PUBLIC_VERCEL_URL.split(',').map(url => url.trim());
+  const vercelUrls = process.env.NEXT_PUBLIC_VERCEL_URL.split(',').map(url => url.trim()).filter(url => url);
   corsOrigins.push(...vercelUrls);
 }
 
-// Log allowed origins for debugging (but don't log in production for security)
-if (process.env.NODE_ENV === 'development') {
-  console.log('🌐 CORS allowed origins:', corsOrigins);
-}
-
-app.use(cors({
-  origin: corsOrigins,
+// Dynamic origin function for Vercel preview deployments
+// This allows any *.vercel.app domain if ALLOW_VERCEL_PREVIEWS is enabled
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
+    if (corsOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } 
+    // If ALLOW_VERCEL_PREVIEWS is enabled, allow any *.vercel.app domain
+    else if (process.env.ALLOW_VERCEL_PREVIEWS === 'true' && origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } 
+    else {
+      console.warn(`🚫 CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'X-Requested-With'],
   optionsSuccessStatus: 200
-}));
+};
+
+// Log allowed origins for debugging (but don't log in production for security)
+if (process.env.NODE_ENV === 'development') {
+  console.log('🌐 CORS allowed origins:', corsOrigins);
+  if (process.env.ALLOW_VERCEL_PREVIEWS === 'true') {
+    console.log('🌐 CORS: Allowing all *.vercel.app domains');
+  }
+}
+
+app.use(cors(corsOptions));
 
 // Enhanced Security middleware
 app.use(securityHeaders);
