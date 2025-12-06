@@ -974,47 +974,136 @@ export const updateProduct = async (req, res) => {
 
       // Handle multiple images if provided
       if (req.body.images && typeof req.body.images === 'object') {
-        // Ensure product_images table exists
-        await ensureProductImagesTable();
-        
-        const { add = [], remove = [], existing = [] } = req.body.images;
-        
-        // Remove images
-        if (remove && remove.length > 0) {
-          await connection.query(
-            'DELETE FROM product_images WHERE id IN (?)',
-            [remove]
-          );
-        }
-        
-        // Add new images
-        if (add && add.length > 0) {
-          for (let i = 0; i < add.length; i++) {
-            await connection.query(
-              `INSERT INTO product_images (product_id, image_url, display_order, is_primary, created_at) 
-               VALUES (?, ?, ?, ?, NOW())`,
-              [id, add[i], i, i === 0 && existing.length === 0] // First new image is primary if no existing images
-            );
-          }
-        }
-        
-        // Update existing images (set primary)
-        if (existing && existing.length > 0) {
-          // First, unset all primary flags
-          await connection.query(
-            'UPDATE product_images SET is_primary = FALSE WHERE product_id = ?',
-            [id]
-          );
-          
-          // Set primary for specified images
-          for (const img of existing) {
-            if (img.is_primary) {
-              await connection.query(
-                'UPDATE product_images SET is_primary = TRUE WHERE id = ? AND product_id = ?',
-                [img.id, id]
+        try {
+          // Ensure product_images table exists
+          const tableExists = await ensureProductImagesTable();
+          if (!tableExists) {
+            console.warn('⚠️ product_images table does not exist, skipping image updates');
+          } else {
+            const { add = [], remove = [], existing = [] } = req.body.images;
+            
+            // Remove images (only if remove array has valid IDs)
+            if (remove && Array.isArray(remove) && remove.length > 0) {
+              // Filter out invalid IDs (non-numeric or string 'primary')
+              const validRemoveIds = remove.filter(id => {
+                // Allow numeric IDs or convert string numbers
+                const numId = typeof id === 'string' && id !== 'primary' ? parseInt(id) : id;
+                return !isNaN(numId) && numId > 0;
+              });
+              
+              if (validRemoveIds.length > 0) {
+                await connection.query(
+                  'DELETE FROM product_images WHERE id IN (?) AND product_id = ?',
+                  [validRemoveIds, id]
+                );
+                console.log(`✅ Removed ${validRemoveIds.length} images for product ${id}`);
+              }
+            }
+            
+            // Add new images
+            if (add && Array.isArray(add) && add.length > 0) {
+              // Get current max display_order for this product
+              const [maxOrderResult] = await connection.query(
+                'SELECT COALESCE(MAX(display_order), -1) as max_order FROM product_images WHERE product_id = ?',
+                [id]
               );
+              const maxOrder = maxOrderResult[0]?.max_order || -1;
+              
+              // Check if there are any existing images (to determine if first new image should be primary)
+              const [existingCount] = await connection.query(
+                'SELECT COUNT(*) as count FROM product_images WHERE product_id = ?',
+                [id]
+              );
+              const hasExistingImages = existingCount[0]?.count > 0;
+              
+              for (let i = 0; i < add.length; i++) {
+                const imageUrl = typeof add[i] === 'string' ? add[i] : add[i].url || add[i];
+                if (!imageUrl || !imageUrl.trim()) {
+                  console.warn(`⚠️ Skipping invalid image URL at index ${i}`);
+                  continue;
+                }
+                
+                const displayOrder = maxOrder + 1 + i;
+                const isPrimary = i === 0 && !hasExistingImages && existing.length === 0;
+                
+                await connection.query(
+                  `INSERT INTO product_images (product_id, image_url, display_order, is_primary, created_at) 
+                   VALUES (?, ?, ?, ?, NOW())`,
+                  [id, imageUrl.trim(), displayOrder, isPrimary ? 1 : 0]
+                );
+              }
+              console.log(`✅ Added ${add.length} new images for product ${id}`);
+            }
+            
+            // Update existing images (set primary)
+            if (existing && Array.isArray(existing) && existing.length > 0) {
+              // First, unset all primary flags for this product
+              await connection.query(
+                'UPDATE product_images SET is_primary = FALSE WHERE product_id = ?',
+                [id]
+              );
+              
+              // Set primary for specified images
+              let primarySet = false;
+              for (const img of existing) {
+                if (img && img.is_primary) {
+                  // Handle both numeric IDs and string IDs (including 'primary')
+                  let imgId = img.id;
+                  if (imgId === 'primary' || imgId === undefined) {
+                    // If ID is 'primary' or undefined, find the first existing image
+                    const [firstImg] = await connection.query(
+                      'SELECT id FROM product_images WHERE product_id = ? ORDER BY display_order ASC LIMIT 1',
+                      [id]
+                    );
+                    if (firstImg.length > 0) {
+                      imgId = firstImg[0].id;
+                    } else {
+                      continue; // No images to set as primary
+                    }
+                  } else {
+                    // Convert string ID to number if needed
+                    imgId = typeof imgId === 'string' ? parseInt(imgId) : imgId;
+                    if (isNaN(imgId) || imgId <= 0) {
+                      console.warn(`⚠️ Invalid image ID: ${img.id}`);
+                      continue;
+                    }
+                  }
+                  
+                  await connection.query(
+                    'UPDATE product_images SET is_primary = TRUE WHERE id = ? AND product_id = ?',
+                    [imgId, id]
+                  );
+                  primarySet = true;
+                  console.log(`✅ Set image ${imgId} as primary for product ${id}`);
+                  break; // Only one primary image
+                }
+              }
+              
+              // If no primary was set but there are existing images, set the first one as primary
+              if (!primarySet) {
+                const [firstImg] = await connection.query(
+                  'SELECT id FROM product_images WHERE product_id = ? ORDER BY display_order ASC LIMIT 1',
+                  [id]
+                );
+                if (firstImg.length > 0) {
+                  await connection.query(
+                    'UPDATE product_images SET is_primary = TRUE WHERE id = ? AND product_id = ?',
+                    [firstImg[0].id, id]
+                  );
+                  console.log(`✅ Auto-set first image as primary for product ${id}`);
+                }
+              }
             }
           }
+        } catch (imageError) {
+          console.error('❌ Error handling product images:', imageError);
+          console.error('Image error details:', {
+            message: imageError.message,
+            stack: imageError.stack,
+            body: req.body.images
+          });
+          // Don't fail the whole update if image handling fails, but log the error
+          // The product update will still succeed
         }
       }
 
