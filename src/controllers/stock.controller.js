@@ -1098,33 +1098,32 @@ const getInventoryStockReport = async (req, res) => {
         }
       }
       
-      // Only include if there are movements or if explicitly requested
-      if (stockIn > 0 || stockOut > 0 || !start_date) {
-        reportData.push({
-          product_id: product.product_id,
-          product_name: product.product_name,
-          category_name: product.category_name,
-          size: productSize,
-          beginning_stock: Math.max(0, beginningStock),
-          stock_in: stockIn, // Total restocks and positive adjustments
-          stock_out: stockOut, // Total sales, returns, damages, and negative adjustments
-          ending_stock: Math.max(0, endingStock), // Beginning + In - Out
-          unit_cost: unitCost, // Unit cost (original_price or price)
-          unit_price: unitPrice, // Unit selling price
-          total_stock_value: totalStockValue, // Ending Stock × Unit Cost
-          stock_status: stockStatus,
-          remarks: movements[0]?.remarks || '',
-          // Breakdown for reference (optional)
-          breakdown: {
-            restocks: parseFloat(movements[0]?.restocks || 0),
-            sales: parseFloat(movements[0]?.sales || 0),
-            returns: parseFloat(movements[0]?.returns || 0),
-            damages: parseFloat(movements[0]?.damages || 0),
-            positive_adjustments: parseFloat(movements[0]?.positive_adjustments || 0),
-            negative_adjustments: parseFloat(movements[0]?.negative_adjustments || 0)
-          }
-        });
-      }
+      // Include all products, even if they have no movements in the period
+      // This ensures the inventory report shows complete stock information
+      reportData.push({
+        product_id: product.product_id,
+        product_name: product.product_name,
+        category_name: product.category_name,
+        size: productSize,
+        beginning_stock: Math.max(0, beginningStock),
+        stock_in: stockIn, // Total restocks and positive adjustments
+        stock_out: stockOut, // Total sales, returns, damages, and negative adjustments
+        ending_stock: Math.max(0, endingStock), // Beginning + In - Out
+        unit_cost: unitCost, // Unit cost (original_price or price)
+        unit_price: unitPrice, // Unit selling price
+        total_stock_value: totalStockValue, // Ending Stock × Unit Cost
+        stock_status: stockStatus,
+        remarks: movements[0]?.remarks || '',
+        // Breakdown for reference (optional)
+        breakdown: {
+          restocks: parseFloat(movements[0]?.restocks || 0),
+          sales: parseFloat(movements[0]?.sales || 0),
+          returns: parseFloat(movements[0]?.returns || 0),
+          damages: parseFloat(movements[0]?.damages || 0),
+          positive_adjustments: parseFloat(movements[0]?.positive_adjustments || 0),
+          negative_adjustments: parseFloat(movements[0]?.negative_adjustments || 0)
+        }
+      });
     }
     
     // Calculate summary (from all data, not just paginated)
