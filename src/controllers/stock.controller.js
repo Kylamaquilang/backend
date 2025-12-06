@@ -1093,47 +1093,51 @@ const getInventoryStockReport = async (req, res) => {
       // Calculate ending stock: Beginning + In - Out
       const endingStock = beginningStock + stockIn - stockOut;
       
-      // Verify calculations match what's in the history
-      // Re-query movements with the same conditions to ensure accuracy
-      // This ensures the report matches exactly what appears in the history
-      const [verificationMovements] = await pool.query(`
-        SELECT 
-          COUNT(*) as total_movements,
-          COALESCE(SUM(CASE 
-            WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
-            WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
-            ELSE 0 
-          END), 0) as total_stock_in,
-          COALESCE(SUM(CASE 
-            WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
-            WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
-            ELSE 0 
-          END), 0) as total_stock_out
-        FROM stock_movements sm
-        WHERE sm.product_id = ?
-          ${sizeCondition}
-          ${dateCondition}
-      `, [product.product_id, ...sizeParams, ...dateParams]);
-      
-      const verifiedStockIn = parseFloat(verificationMovements[0]?.total_stock_in || 0);
-      const verifiedStockOut = parseFloat(verificationMovements[0]?.total_stock_out || 0);
-      
-      // Use verified totals to ensure consistency with history
-      // This ensures the report exactly matches what's shown in the inventory history
-      if (Math.abs(verifiedStockIn - stockIn) > 0.01 || Math.abs(verifiedStockOut - stockOut) > 0.01) {
-        console.warn(`⚠️ Calculation discrepancy for Product ${product.product_id} "${product.product_name}" (Size: ${productSize}):`);
-        console.warn(`   Initial calculation - In: ${stockIn}, Out: ${stockOut}`);
-        console.warn(`   Verified calculation - In: ${verifiedStockIn}, Out: ${verifiedStockOut}`);
-        console.warn(`   Using verified totals to match history`);
+      // Verify calculations match what's in the history (optional verification)
+      // Only verify if there's a potential issue, otherwise use the initial calculation
+      try {
+        const [verificationMovements] = await pool.query(`
+          SELECT 
+            COUNT(*) as total_movements,
+            COALESCE(SUM(CASE 
+              WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
+              ELSE 0 
+            END), 0) as total_stock_in,
+            COALESCE(SUM(CASE 
+              WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
+              ELSE 0 
+            END), 0) as total_stock_out
+          FROM stock_movements sm
+          WHERE sm.product_id = ?
+            ${sizeCondition}
+            ${dateCondition}
+        `, [product.product_id, ...sizeParams, ...dateParams]);
+        
+        const verifiedStockIn = parseFloat(verificationMovements[0]?.total_stock_in || 0);
+        const verifiedStockOut = parseFloat(verificationMovements[0]?.total_stock_out || 0);
         
         // Use verified totals to ensure consistency with history
-        stockIn = verifiedStockIn;
-        stockOut = verifiedStockOut;
+        // This ensures the report exactly matches what's shown in the inventory history
+        if (Math.abs(verifiedStockIn - stockIn) > 0.01 || Math.abs(verifiedStockOut - stockOut) > 0.01) {
+          console.warn(`⚠️ Calculation discrepancy for Product ${product.product_id} "${product.product_name}" (Size: ${productSize}):`);
+          console.warn(`   Initial calculation - In: ${stockIn}, Out: ${stockOut}`);
+          console.warn(`   Verified calculation - In: ${verifiedStockIn}, Out: ${verifiedStockOut}`);
+          console.warn(`   Using verified totals to match history`);
+          
+          // Use verified totals to ensure consistency with history
+          stockIn = verifiedStockIn;
+          stockOut = verifiedStockOut;
+        }
+      } catch (verifyError) {
+        // If verification fails, use the initial calculation
+        // This prevents the entire report from failing due to verification issues
+        console.warn(`⚠️ Verification query failed for Product ${product.product_id}, using initial calculation:`, verifyError.message);
       }
       
-      // Recalculate ending stock with verified values
-      const verifiedEndingStock = beginningStock + stockIn - stockOut;
-      endingStock = Math.max(0, verifiedEndingStock);
+      // Calculate ending stock: Beginning + In - Out
+      const endingStock = beginningStock + stockIn - stockOut;
       
       // Get unit price/cost (size price if available, otherwise product price)
       // Try to get cost from original_price first, then price
