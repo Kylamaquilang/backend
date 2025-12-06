@@ -906,7 +906,7 @@ const getInventoryStockReport = async (req, res) => {
     const { start_date, end_date, product_id, category_id, size, status, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     
-    // Build date filter
+    // Build date filter for stock_movements query
     let dateFilter = '';
     let dateParams = [];
     
@@ -919,23 +919,7 @@ const getInventoryStockReport = async (req, res) => {
       dateParams.push(end_date);
     }
     
-    // Build product filter
-    if (product_id) {
-      dateFilter += 'AND p.id = ? ';
-      dateParams.push(parseInt(product_id));
-    }
-    
-    // Build category filter
-    if (category_id) {
-      dateFilter += 'AND p.category_id = ? ';
-      dateParams.push(parseInt(category_id));
-    }
-    
-    // Build size filter
-    if (size && size !== 'N/A' && size !== 'NONE') {
-      dateFilter += 'AND (ps.size = ? OR (ps.size IS NULL AND ? = \'N/A\')) ';
-      dateParams.push(size, size);
-    }
+    // Note: product_id, category_id, and size filters are applied in the product query, not in dateFilter
     
     // Get all products with their sizes
     let productQuery = `
