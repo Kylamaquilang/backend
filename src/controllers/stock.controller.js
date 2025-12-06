@@ -1006,7 +1006,7 @@ const getInventoryStockReport = async (req, res) => {
           WHERE sm.product_id = ?
             AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))
             AND DATE(sm.created_at) < ?
-        `, [product.product_id, sizeId, sizeId, start_date]);
+        `, [product.product_id, sizeId || null, sizeId || null, start_date]);
         
         const stockInBefore = parseFloat(movementsBefore[0]?.stock_in || 0);
         const stockOutBefore = parseFloat(movementsBefore[0]?.stock_out || 0);
@@ -1052,14 +1052,14 @@ const getInventoryStockReport = async (req, res) => {
           SUM(CASE WHEN sm.movement_type = 'stock_out' AND sm.reason LIKE '%damage%' THEN sm.quantity ELSE 0 END) as damages,
           SUM(CASE WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity ELSE 0 END) as positive_adjustments,
           SUM(CASE WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END) as negative_adjustments,
-          GROUP_CONCAT(DISTINCT CONCAT(sm.reason, ': ', COALESCE(sm.notes, '')) SEPARATOR '; ') as remarks
+          GROUP_CONCAT(DISTINCT CONCAT(COALESCE(sm.reason, ''), ': ', COALESCE(sm.notes, '')) SEPARATOR '; ' LIMIT 1000) as remarks
         FROM stock_movements sm
         WHERE sm.product_id = ?
           AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))
           ${dateFilter}
       `;
       
-      const movementParams = [product.product_id, sizeId, sizeId, ...dateParams];
+      const movementParams = [product.product_id, sizeId || null, sizeId || null, ...dateParams];
       const [movements] = await pool.query(movementQuery, movementParams);
       
       // Calculate totals
@@ -1154,7 +1154,18 @@ const getInventoryStockReport = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching inventory stock report:', error);
-    res.status(500).json({ error: 'Failed to fetch inventory stock report' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      sqlState: error.sqlState,
+      sqlMessage: error.sqlMessage,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      error: 'Failed to fetch inventory stock report',
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
