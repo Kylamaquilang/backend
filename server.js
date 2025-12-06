@@ -162,6 +162,9 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+// Handle preflight OPTIONS requests explicitly for all routes
+app.options('*', cors(corsOptions));
+
 // Enhanced Security middleware
 app.use(securityHeaders);
 app.use(requestLogger);
