@@ -51,7 +51,7 @@ import {
 dotenv.config();
 const app = express();
 const server = createServer(app);
-// CORS origins - support both localhost and Railway frontend URL
+// CORS origins - support both localhost and production frontend URLs
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001', 
@@ -61,7 +61,20 @@ const allowedOrigins = [
 
 // Add Railway frontend URL if provided
 if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
+  const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+  allowedOrigins.push(...frontendUrls);
+}
+
+// Add Vercel frontend URL if provided
+if (process.env.VERCEL_URL) {
+  const vercelUrls = process.env.VERCEL_URL.split(',').map(url => url.trim());
+  allowedOrigins.push(...vercelUrls);
+}
+
+// Support common Vercel patterns
+if (process.env.NEXT_PUBLIC_VERCEL_URL) {
+  const vercelUrls = process.env.NEXT_PUBLIC_VERCEL_URL.split(',').map(url => url.trim());
+  allowedOrigins.push(...vercelUrls);
 }
 
 const io = new Server(server, {
@@ -87,7 +100,7 @@ app.use('/uploads', (req, res, next) => {
 }, express.static(path.join(__dirname, 'uploads')));
 
 // CORS configuration - Must come BEFORE rate limiting to handle preflight requests
-// Support both localhost and Railway frontend URL
+// Support both localhost and production frontend URLs
 const corsOrigins = [
   'http://localhost:3000',
   'http://localhost:3001', 
@@ -95,9 +108,27 @@ const corsOrigins = [
   'http://127.0.0.1:3001'
 ];
 
-// Add Railway frontend URL if provided
+// Add Railway frontend URL if provided (supports comma-separated multiple URLs)
 if (process.env.FRONTEND_URL) {
-  corsOrigins.push(process.env.FRONTEND_URL);
+  const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+  corsOrigins.push(...frontendUrls);
+}
+
+// Add Vercel frontend URL if provided (supports comma-separated multiple URLs)
+if (process.env.VERCEL_URL) {
+  const vercelUrls = process.env.VERCEL_URL.split(',').map(url => url.trim());
+  corsOrigins.push(...vercelUrls);
+}
+
+// Support common Vercel patterns
+if (process.env.NEXT_PUBLIC_VERCEL_URL) {
+  const vercelUrls = process.env.NEXT_PUBLIC_VERCEL_URL.split(',').map(url => url.trim());
+  corsOrigins.push(...vercelUrls);
+}
+
+// Log allowed origins for debugging (but don't log in production for security)
+if (process.env.NODE_ENV === 'development') {
+  console.log('🌐 CORS allowed origins:', corsOrigins);
 }
 
 app.use(cors({
