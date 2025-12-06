@@ -988,9 +988,34 @@ const getInventoryStockReport = async (req, res) => {
         sizeCondition = 'AND (sm.size_id IS NULL OR sm.size_id = 0)';
       }
       
+      // Build size condition for all queries (must be done before using it)
+      // For products with sizes: match exact size_id
+      // For products without sizes: match NULL size_id OR movements that don't have size_id
+      let sizeCondition = '';
+      let sizeParams = [];
+      if (sizeId) {
+        // Product has a specific size - match movements for that size only
+        sizeCondition = 'AND sm.size_id = ?';
+        sizeParams = [sizeId];
+      } else {
+        // Product has no size - match movements where size_id is NULL or 0
+        // This includes movements recorded without size_id (from updateProductStock, etc.)
+        sizeCondition = 'AND (sm.size_id IS NULL OR sm.size_id = 0)';
+      }
+      
       // Calculate beginning stock (movements before start_date)
       let beginningStock = 0;
       if (start_date) {
+        // Build size condition for movements before start_date (same logic as period movements)
+        let sizeConditionBefore = '';
+        let sizeParamsBefore = [];
+        if (sizeId) {
+          sizeConditionBefore = 'AND sm.size_id = ?';
+          sizeParamsBefore = [sizeId];
+        } else {
+          sizeConditionBefore = 'AND (sm.size_id IS NULL OR sm.size_id = 0)';
+        }
+        
         const [movementsBefore] = await pool.query(`
           SELECT 
             COALESCE(SUM(CASE 
@@ -1005,9 +1030,9 @@ const getInventoryStockReport = async (req, res) => {
             END), 0) as stock_out
           FROM stock_movements sm
           WHERE sm.product_id = ?
-            ${sizeCondition}
+            ${sizeConditionBefore}
             AND DATE(sm.created_at) < ?
-        `, [product.product_id, ...sizeParams, start_date]);
+        `, [product.product_id, ...sizeParamsBefore, start_date]);
         
         const stockInBefore = parseFloat(movementsBefore[0]?.stock_in || 0);
         const stockOutBefore = parseFloat(movementsBefore[0]?.stock_out || 0);
@@ -1092,44 +1117,46 @@ const getInventoryStockReport = async (req, res) => {
       // Calculate ending stock: Beginning + In - Out
       const endingStock = beginningStock + stockIn - stockOut;
       
-      // Debug logging for troubleshooting - ALWAYS log to help diagnose issues
-      const debugInfo = {
-        product_id: product.product_id,
-        product_name: product.product_name,
-        size: productSize || 'N/A',
-        sizeId: sizeId || null,
-        beginningStock,
-        stockIn,
-        stockOut,
-        endingStock,
-        queryParams: {
-          sizeCondition,
-          dateCondition,
-          dateParams: dateParams.length > 0 ? dateParams : 'none (all movements)'
-        },
-        movementData: movements?.[0] || null,
-        hasMovements: movements && movements.length > 0 && movements[0]?.stock_in !== null
-      };
+      // Verify calculations match what's in the history
+      // Double-check by querying all movements for this product/size to ensure accuracy
+      const [verificationMovements] = await pool.query(`
+        SELECT 
+          COUNT(*) as total_movements,
+          COALESCE(SUM(CASE 
+            WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
+            WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
+            ELSE 0 
+          END), 0) as total_stock_in,
+          COALESCE(SUM(CASE 
+            WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
+            WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
+            ELSE 0 
+          END), 0) as total_stock_out
+        FROM stock_movements sm
+        WHERE sm.product_id = ?
+          ${sizeCondition}
+      `, [product.product_id, ...sizeParams]);
       
-      console.log(`📊 Inventory Report - Product ${product.product_id} "${product.product_name}":`, JSON.stringify(debugInfo, null, 2));
+      const verifiedStockIn = parseFloat(verificationMovements[0]?.total_stock_in || 0);
+      const verifiedStockOut = parseFloat(verificationMovements[0]?.total_stock_out || 0);
       
-      // Also log a simple summary
-      if (stockIn === 0 && stockOut === 0 && beginningStock === 0) {
-        console.warn(`⚠️ WARNING: Product ${product.product_id} "${product.product_name}" has ZERO movements. Checking if movements exist in database...`);
+      // If there's a discrepancy, use the verified totals (all movements)
+      if (Math.abs(verifiedStockIn - stockIn) > 0.01 || Math.abs(verifiedStockOut - stockOut) > 0.01) {
+        console.warn(`⚠️ Discrepancy detected for Product ${product.product_id} "${product.product_name}" (Size: ${productSize}):`);
+        console.warn(`   Period movements - In: ${stockIn}, Out: ${stockOut}`);
+        console.warn(`   All movements - In: ${verifiedStockIn}, Out: ${verifiedStockOut}`);
+        console.warn(`   Using verified totals from all movements to match history`);
         
-        // Quick diagnostic query to see if ANY movements exist for this product
-        const [diagnostic] = await pool.query(`
-          SELECT 
-            COUNT(*) as total_movements,
-            COUNT(CASE WHEN size_id IS NULL THEN 1 END) as movements_without_size,
-            COUNT(CASE WHEN size_id = ? THEN 1 END) as movements_with_size,
-            SUM(CASE WHEN movement_type = 'stock_in' THEN quantity ELSE 0 END) as total_stock_in,
-            SUM(CASE WHEN movement_type = 'stock_out' THEN quantity ELSE 0 END) as total_stock_out
-          FROM stock_movements
-          WHERE product_id = ?
-        `, [sizeId || null, product.product_id]);
+        // Use verified totals to ensure consistency with history
+        stockIn = verifiedStockIn;
+        stockOut = verifiedStockOut;
         
-        console.warn(`🔍 Diagnostic for Product ${product.product_id}:`, diagnostic[0]);
+        // Recalculate ending stock with verified values
+        const verifiedEndingStock = beginningStock + stockIn - stockOut;
+        const finalEndingStock = Math.max(0, verifiedEndingStock);
+        
+        // Update the ending stock
+        endingStock = finalEndingStock;
       }
       
       // Get unit price/cost (size price if available, otherwise product price)
