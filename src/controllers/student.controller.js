@@ -27,9 +27,7 @@ export const addStudent = async (req, res) => {
       status 
     } = req.body;
 
-    console.log('🔍 Received student data:', req.body);
-    console.log('🔍 Status value:', status);
-    console.log('🔍 Status type:', typeof status);
+    // Reduced logging for performance
 
     // Validation
     if (!student_id || !first_name || !last_name || !email || !degree || !status) {
@@ -71,20 +69,9 @@ export const addStudent = async (req, res) => {
 
     // Validate status
     const validStatuses = ['regular', 'irregular'];
-    console.log('🔍 Validating status:', status);
-    console.log('🔍 Status type:', typeof status);
-    console.log('🔍 Status length:', status?.length);
-    console.log('🔍 Status char codes:', status?.split('').map(c => c.charCodeAt(0)));
-    console.log('🔍 Valid statuses:', validStatuses);
-    console.log('🔍 Status includes check:', validStatuses.includes(status));
-    
-    // Clean the status value
     const cleanStatus = status?.trim().toLowerCase();
-    console.log('🔍 Clean status:', cleanStatus);
-    console.log('🔍 Clean status includes check:', validStatuses.includes(cleanStatus));
     
     if (!validStatuses.includes(cleanStatus)) {
-      console.log('❌ Status validation failed for:', status, '-> cleaned:', cleanStatus);
       return res.status(400).json({ 
         error: 'Invalid status. Must be either "regular" or "irregular"' 
       });
@@ -181,30 +168,42 @@ export const addStudent = async (req, res) => {
         ]
       );
 
-      // Send welcome email
-      try {
-        await sendWelcomeEmail(email.trim(), fullName, student_id.trim(), DEFAULT_STUDENT_PASSWORD);
-      } catch (emailError) {
-        console.warn('Failed to send welcome email:', emailError.message);
-      }
+    // Emit refresh signals for real-time updates (do this before sending response)
+    const io = req.app.get('io');
+    if (io) {
+      emitDataRefresh(io, 'users', { action: 'created', userId: userToReactivate.id });
+      emitAdminDataRefresh(io, 'users', { action: 'created', userId: userToReactivate.id });
+      // Also emit new-user event for compatibility
+      io.to('admin-room').emit('new-user', {
+        id: userToReactivate.id,
+        student_id: student_id.trim(),
+        name: fullName,
+        email: email.trim(),
+        degree,
+        status: cleanStatus
+      });
+    }
 
-      // Emit refresh signals for real-time updates
-      const io = req.app.get('io');
-      if (io) {
-        emitDataRefresh(io, 'users', { action: 'created', userId: userToReactivate.id });
-        emitAdminDataRefresh(io, 'users', { action: 'created', userId: userToReactivate.id });
-        // Also emit new-user event for compatibility
-        io.to('admin-room').emit('new-user', {
-          id: userToReactivate.id,
-          student_id: student_id.trim(),
-          name: fullName,
-          email: email.trim(),
-          degree,
-          status: cleanStatus
-        });
+    // Send response immediately
+    res.status(200).json({ 
+      message: 'Student reactivated successfully',
+      student: {
+        id: userToReactivate.id,
+        student_id: student_id.trim(),
+        name: fullName,
+        email: email.trim(),
+        degree,
+        status: cleanStatus
       }
+    });
 
-      return res.status(200).json({ 
+    // Send welcome email asynchronously (fire and forget - don't block response)
+    sendWelcomeEmail(email.trim(), fullName, student_id.trim(), DEFAULT_STUDENT_PASSWORD)
+      .catch(emailError => {
+        console.warn('Failed to send welcome email (non-blocking):', emailError.message);
+      });
+
+    return;
         message: 'Student reactivated successfully',
         student: {
           id: userToReactivate.id,
@@ -260,14 +259,7 @@ export const addStudent = async (req, res) => {
       ]
     );
 
-    // Send welcome email
-    try {
-      await sendWelcomeEmail(email.trim(), fullName, student_id.trim(), DEFAULT_STUDENT_PASSWORD);
-    } catch (emailError) {
-      console.warn('Failed to send welcome email:', emailError.message);
-    }
-
-    // Emit refresh signals for real-time updates
+    // Emit refresh signals for real-time updates (do this before sending response)
     const io = req.app.get('io');
     if (io) {
       emitDataRefresh(io, 'users', { action: 'created', userId: result.insertId });
@@ -283,7 +275,26 @@ export const addStudent = async (req, res) => {
       });
     }
 
+    // Send response immediately (don't wait for email)
     res.status(201).json({ 
+      message: 'Student added successfully',
+      student: {
+        id: result.insertId,
+        student_id: student_id.trim(),
+        name: fullName,
+        email: email.trim(),
+        degree,
+        status: cleanStatus
+      }
+    });
+
+    // Send welcome email asynchronously (fire and forget - don't block response)
+    sendWelcomeEmail(email.trim(), fullName, student_id.trim(), DEFAULT_STUDENT_PASSWORD)
+      .catch(emailError => {
+        console.warn('Failed to send welcome email (non-blocking):', emailError.message);
+      });
+
+    return; 
       message: 'Student added successfully',
       student: {
         id: result.insertId,
