@@ -974,12 +974,17 @@ const getInventoryStockReport = async (req, res) => {
       // This ensures accuracy by calculating from the source of truth (movements)
       
       // Build size condition for all queries
+      // For products with sizes: match exact size_id
+      // For products without sizes: match NULL size_id OR movements that don't have size_id
       let sizeCondition = '';
       let sizeParams = [];
       if (sizeId) {
+        // Product has a specific size - match movements for that size only
         sizeCondition = 'AND sm.size_id = ?';
         sizeParams = [sizeId];
       } else {
+        // Product has no size - match movements where size_id is NULL
+        // This includes movements recorded without size_id (from updateProductStock, etc.)
         sizeCondition = 'AND (sm.size_id IS NULL OR sm.size_id = 0)';
       }
       
