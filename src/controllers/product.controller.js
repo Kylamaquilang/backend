@@ -128,6 +128,7 @@ export const getAllProductsSimple = async (req, res) => {
             updated_by: 'N/A',
             created_at: product.created_at,
             last_restock_date: product.last_restock_date,
+            category_id: product.category_id || null,
             category_name: product.category_name,
             category: product.category || product.category_name || 'Other',
             sizes: sizes.map(size => ({
