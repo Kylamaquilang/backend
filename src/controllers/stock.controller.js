@@ -983,109 +983,87 @@ const getInventoryStockReport = async (req, res) => {
         }
       }
       
-      // Calculate beginning stock from ALL stock movements before the start date
+      // Calculate stock from ALL stock movements
       // This ensures accuracy by calculating from the source of truth (movements)
-      let beginningStock = 0;
       
-      if (start_date) {
-        // Calculate stock at the start_date by summing all movements before that date
-        // Build size condition for movements before start_date
-        let sizeConditionBefore = '';
-        let sizeParamsBefore = [];
-        if (sizeId) {
-          sizeConditionBefore = 'AND sm.size_id = ?';
-          sizeParamsBefore = [sizeId];
-        } else {
-          sizeConditionBefore = 'AND sm.size_id IS NULL';
-        }
-        
-        const [movementsBefore] = await pool.query(`
-          SELECT 
-            SUM(CASE 
-              WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
-              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
-              ELSE 0 
-            END) as stock_in,
-            SUM(CASE 
-              WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
-              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
-              ELSE 0 
-            END) as stock_out
-          FROM stock_movements sm
-          WHERE sm.product_id = ?
-            ${sizeConditionBefore}
-            AND DATE(sm.created_at) < ?
-        `, [product.product_id, ...sizeParamsBefore, start_date]);
-        
-        const stockInBefore = parseFloat(movementsBefore[0]?.stock_in || 0);
-        const stockOutBefore = parseFloat(movementsBefore[0]?.stock_out || 0);
-        // Beginning stock = all stock in - all stock out before start_date
-        beginningStock = stockInBefore - stockOutBefore;
-      } else {
-        // No start date - beginning stock is 0 (we'll calculate total from all movements)
-        beginningStock = 0;
-      }
-      
-      // Get stock movements in the period
-      // Stock In includes: restocks (stock_in) and positive adjustments
-      // Stock Out includes: sales, returns, damages (stock_out) and negative adjustments
-      let movementQuery = `
-        SELECT 
-          -- Stock In: restocks and positive adjustments
-          SUM(CASE 
-            WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
-            WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
-            ELSE 0 
-          END) as stock_in,
-          -- Stock Out: sales, returns, damages, and negative adjustments
-          SUM(CASE 
-            WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
-            WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
-            ELSE 0 
-          END) as stock_out,
-          -- Breakdown by reason for reporting
-          SUM(CASE WHEN sm.movement_type = 'stock_in' AND (sm.reason LIKE '%restock%' OR sm.reason LIKE '%restock%' OR sm.reason = 'restock') THEN sm.quantity ELSE 0 END) as restocks,
-          SUM(CASE WHEN sm.movement_type = 'stock_out' AND (sm.reason LIKE '%sale%' OR sm.reason LIKE '%order%') THEN sm.quantity ELSE 0 END) as sales,
-          SUM(CASE WHEN sm.movement_type = 'stock_out' AND sm.reason LIKE '%return%' THEN sm.quantity ELSE 0 END) as returns,
-          SUM(CASE WHEN sm.movement_type = 'stock_out' AND sm.reason LIKE '%damage%' THEN sm.quantity ELSE 0 END) as damages,
-          SUM(CASE WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity ELSE 0 END) as positive_adjustments,
-          SUM(CASE WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END) as negative_adjustments,
-          SUBSTRING(GROUP_CONCAT(DISTINCT CONCAT(COALESCE(sm.reason, ''), ': ', COALESCE(sm.notes, '')) SEPARATOR '; '), 1, 1000) as remarks
-        FROM stock_movements sm
-        WHERE sm.product_id = ?
-          AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))
-          ${dateFilter}
-      `;
-      
-      // Build size condition for movements in period
+      // Build size condition for all queries
       let sizeCondition = '';
       let sizeParams = [];
       if (sizeId) {
         sizeCondition = 'AND sm.size_id = ?';
         sizeParams = [sizeId];
       } else {
-        sizeCondition = 'AND sm.size_id IS NULL';
+        sizeCondition = 'AND (sm.size_id IS NULL OR sm.size_id = 0)';
       }
       
-      // Replace the size condition placeholder in the query
-      const finalMovementQuery = movementQuery.replace(
-        'AND (sm.size_id = ? OR (sm.size_id IS NULL AND ? IS NULL))',
-        sizeCondition
-      );
+      // Calculate beginning stock (movements before start_date)
+      let beginningStock = 0;
+      if (start_date) {
+        const [movementsBefore] = await pool.query(`
+          SELECT 
+            COALESCE(SUM(CASE 
+              WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
+              ELSE 0 
+            END), 0) as stock_in,
+            COALESCE(SUM(CASE 
+              WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
+              WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
+              ELSE 0 
+            END), 0) as stock_out
+          FROM stock_movements sm
+          WHERE sm.product_id = ?
+            ${sizeCondition}
+            AND DATE(sm.created_at) < ?
+        `, [product.product_id, ...sizeParams, start_date]);
+        
+        const stockInBefore = parseFloat(movementsBefore[0]?.stock_in || 0);
+        const stockOutBefore = parseFloat(movementsBefore[0]?.stock_out || 0);
+        beginningStock = stockInBefore - stockOutBefore;
+      }
       
-      const movementParams = [product.product_id, ...sizeParams, ...dateParams];
-      const [movements] = await pool.query(finalMovementQuery, movementParams);
+      // Get stock movements in the period (or all movements if no date filter)
+      let dateCondition = '';
+      let dateParams = [];
+      if (start_date) {
+        dateCondition += 'AND DATE(sm.created_at) >= ?';
+        dateParams.push(start_date);
+      }
+      if (end_date) {
+        dateCondition += 'AND DATE(sm.created_at) <= ?';
+        dateParams.push(end_date);
+      }
       
-      // Calculate totals from movements in the period
-      // Stock In = restocks + positive adjustments
+      const [movements] = await pool.query(`
+        SELECT 
+          COALESCE(SUM(CASE 
+            WHEN sm.movement_type = 'stock_in' THEN sm.quantity 
+            WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity 
+            ELSE 0 
+          END), 0) as stock_in,
+          COALESCE(SUM(CASE 
+            WHEN sm.movement_type = 'stock_out' THEN sm.quantity 
+            WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) 
+            ELSE 0 
+          END), 0) as stock_out,
+          COALESCE(SUM(CASE WHEN sm.movement_type = 'stock_in' AND (sm.reason LIKE '%restock%' OR sm.reason = 'restock') THEN sm.quantity ELSE 0 END), 0) as restocks,
+          COALESCE(SUM(CASE WHEN sm.movement_type = 'stock_out' AND (sm.reason LIKE '%sale%' OR sm.reason LIKE '%order%') THEN sm.quantity ELSE 0 END), 0) as sales,
+          COALESCE(SUM(CASE WHEN sm.movement_type = 'stock_out' AND sm.reason LIKE '%return%' THEN sm.quantity ELSE 0 END), 0) as returns,
+          COALESCE(SUM(CASE WHEN sm.movement_type = 'stock_out' AND sm.reason LIKE '%damage%' THEN sm.quantity ELSE 0 END), 0) as damages,
+          COALESCE(SUM(CASE WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity > 0 THEN sm.quantity ELSE 0 END), 0) as positive_adjustments,
+          COALESCE(SUM(CASE WHEN sm.movement_type = 'stock_adjustment' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0) as negative_adjustments,
+          SUBSTRING(GROUP_CONCAT(DISTINCT CONCAT(COALESCE(sm.reason, ''), ': ', COALESCE(sm.notes, '')) SEPARATOR '; '), 1, 1000) as remarks
+        FROM stock_movements sm
+        WHERE sm.product_id = ?
+          ${sizeCondition}
+          ${dateCondition}
+      `, [product.product_id, ...sizeParams, ...dateParams]);
+      
+      // Calculate totals from movements
       const stockIn = parseFloat(movements[0]?.stock_in || 0);
-      // Stock Out = sales + returns + damages + negative adjustments
       const stockOut = parseFloat(movements[0]?.stock_out || 0);
       
-      // Calculate ending stock
-      // Formula: ending_stock = beginning_stock + stock_in - stock_out
-      // - With start_date: beginning_stock = movements before start_date, stock_in/out = movements in period
-      // - Without start_date: beginning_stock = 0, stock_in/out = ALL movements (dateFilter is empty)
+      // Calculate ending stock: Beginning + In - Out
       const endingStock = beginningStock + stockIn - stockOut;
       
       // Debug logging for troubleshooting
